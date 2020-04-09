@@ -15,13 +15,14 @@
     "state_sync_interval": "5m0s",
     "pin_recover_interval": "12m0s",
     "replication_factor_min": -1,
-    "replication_factor_max": -1,
+    "replication_factor_max": 20,
     "monitor_ping_interval": "15s",
     "peer_watch_interval": "5s",
     "mdns_interval": "10s",
     "disable_repinning": false,
     "peer_addresses": [
-	"/ip4/10.20.20.80/udp/9096/quic/p2p/12D3KooWNVjGWWSHvcxXZXLNpKnJMdXxdYfRzDFq95R72qFu89Ku"
+	"/ip4/10.20.20.80/udp/9096/quic/p2p/12D3KooWNVjGWWSHvcxXZXLNpKnJMdXxdYfRzDFq95R72qFu89Ku",
+	"/ip4/10.20.20.119/udp/9096/quic/p2p/12D3KooWT3HUqBPFi52U3G3ee6f3xgaZTgdngxVYyEZMrZ9eqS4a"
     ]
   },
   "consensus": {
