@@ -29,8 +29,8 @@
     "crdt": {
       "cluster_name": "dcr-blob-poc",
       "trusted_peers": [
-        "QmdAbbtyPdH1NA9NN7uDqjbdbkDEXh1wEat79QKBmMG6pL",
-	"QmYCZ8w5ZN7G3uJS1W9eS3ZDdnTVexDzNGWSwaPdFMGDZ5"
+	      "12D3KooWT3HUqBPFi52U3G3ee6f3xgaZTgdngxVYyEZMrZ9eqS4a",
+	      "12D3KooWNVjGWWSHvcxXZXLNpKnJMdXxdYfRzDFq95R72qFu89Ku"
       ]
     }
   },
