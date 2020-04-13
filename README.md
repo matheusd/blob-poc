@@ -9,6 +9,11 @@ $ (cd ipfs-cluster && make install)
 $ ipfs init
 $ ipfs daemon # run on separate terminal
 
+# (for local testing)
+$ ipfs-cluster-service init --consensus crdt
+$ ipfs-cluster-service daemon
+
+# (for joining my test cluster)
 $ ipfs-cluster-service https://github.com/matheusd/blob-poc/raw/master/dcr-blob-poc.json
 ```
 
