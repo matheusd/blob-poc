@@ -4,9 +4,9 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/binary"
+	"io/ioutil"
 	"math/rand"
 	"os"
-	"path"
 	"testing"
 	"time"
 
@@ -35,8 +35,7 @@ type testCtx struct {
 func newTestCtx(t testing.TB) (*testCtx, func()) {
 	t.Helper()
 
-	testDir := path.Join(os.TempDir(), fmt.Sprintf("%d", crandInt64()&!(1<<63)))
-	err := os.Mkdir(testDir)
+	testDir, err := ioutil.TempDir("", "ipfsblob-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +57,12 @@ func newTestCtx(t testing.TB) (*testCtx, func()) {
 		for _, f := range tc.cancels {
 			f()
 		}
-		os.RemoveAll(testDir)
+		switch t.Failed() {
+		case true:
+			t.Logf("Test dir: %s", testDir)
+		default:
+			os.RemoveAll(testDir)
+		}
 	}
 	return tc, tearDown
 }

@@ -64,8 +64,8 @@ func (s *ipfsBlob) Put(data []byte) ([]byte, error) {
 	// should be a tmpfs so we don't actually hit the disk.
 	//
 	// TODO: decide when to remove this file.
-	fname := uuid.New().String()
-	err := ioutil.WriteFile(filepath.Join(s.cfg.TempDir, fname), data, 0644)
+	fname := filepath.Join(s.cfg.TempDir, uuid.New().String())
+	err := ioutil.WriteFile(fname, data, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("error writing temp file: %v", err)
 	}
