@@ -2,15 +2,20 @@ package ipfsblob
 
 import (
 	"bytes"
+	"context"
 	crand "crypto/rand"
+	"database/sql"
 	"encoding/binary"
+	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
-	cluster "github.com/ipfs/ipfs-cluster/api/rest/client"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/loov/hrtime"
 )
 
@@ -27,8 +32,13 @@ const (
 	defaultTimeout = time.Second * 30
 )
 
+var (
+	testDB           *sql.DB
+	lastServerExecId uint32
+)
+
 type testCtx struct {
-	ipfs    *ipfsBlob
+	s       *sqlBlob
 	cancels []func()
 	testing.TB
 }
@@ -40,19 +50,19 @@ func newTestCtx(t testing.TB) (*testCtx, func()) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ccfg := &cluster.Config{}
 	cfg := &Config{
 		DefaultTimeout: 30 * time.Second,
-		TempDir:        testDir,
+		DB:             testDB,
+		ServerExecID:   atomic.AddUint32(&lastServerExecId, 1),
 	}
-	ipfs, err := new(ccfg, cfg)
+	s, err := new(cfg)
 	if err != nil {
 		t.Fatalf("unable to create ipfsBlob: %v", err)
 	}
 
 	tc := &testCtx{
-		TB:   t,
-		ipfs: ipfs,
+		TB: t,
+		s:  s,
 	}
 	tearDown := func() {
 		for _, f := range tc.cancels {
@@ -81,13 +91,13 @@ func TestPutGet(t *testing.T) {
 	}
 
 	start := time.Now()
-	name, err := tc.ipfs.Put(data)
+	name, err := tc.s.Put(data)
 	if err != nil {
 		t.Fatalf("unable to Put: %v", err)
 	}
 	putTime := time.Now()
 
-	newData, err := tc.ipfs.Get(name)
+	newData, err := tc.s.Get(name)
 	if err != nil {
 		t.Fatalf("unable to Get: %v", err)
 	}
@@ -202,14 +212,11 @@ func TestBenchPut(t *testing.T) {
 		defer doneTc()
 
 		// Modify the running config of the blob.
-		tc.ipfs.cfg.ReplFactorMin = c.replFactorMin
-		tc.ipfs.cfg.ReplFactorMax = c.replFactorMax
-		tc.ipfs.cfg.Local = c.local
 
 		bench := hrtime.NewBenchmark(c.N)
 		var i int
 		for bench.Next() {
-			_, err := tc.ipfs.Put(c.data(i))
+			_, err := tc.s.Put(c.data(i))
 			if err != nil {
 				t.Fatalf("failed to put at %d: %v", i, err)
 			}
@@ -227,4 +234,38 @@ func TestBenchPut(t *testing.T) {
 			break
 		}
 	}
+}
+
+func TestMain(m *testing.M) {
+	var err error
+	testDB, err = sql.Open("mysql", "root@/repli")
+	if err != nil {
+		fmt.Printf("unable to connect to DB: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err = testDB.QueryContext(ctx, "select * from kv limit 1")
+	if err != nil {
+		if strings.Index(err.Error(), "Error 1146") > -1 {
+			_, err := testDB.ExecContext(ctx, sqlTableKV)
+			if err != nil {
+				fmt.Printf("unable to create kv table: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Printf("unable to query kv table: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	_, err = testDB.QueryContext(ctx, "delete from kv")
+	if err != nil {
+		fmt.Printf("unable to clean up kv table: %v\n", err)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
 }
