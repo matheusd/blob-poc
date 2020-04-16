@@ -6,12 +6,12 @@ import (
 	crand "crypto/rand"
 	"database/sql"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
 	"os"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,7 +53,6 @@ func newTestCtx(t testing.TB) (*testCtx, func()) {
 	cfg := &Config{
 		DefaultTimeout: 30 * time.Second,
 		DB:             testDB,
-		ServerExecID:   atomic.AddUint32(&lastServerExecId, 1),
 	}
 	s, err := new(cfg)
 	if err != nil {
@@ -76,6 +75,29 @@ func newTestCtx(t testing.TB) (*testCtx, func()) {
 		}
 	}
 	return tc, tearDown
+}
+
+// TestSetupDB tests that the datbase can be setup.
+func TestSetupDB(t *testing.T) {
+	// Manually drop the existing table.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	testDB.ExecContext(ctx, "drop table kv")
+
+	cfg := &Config{
+		DB:             testDB,
+		DefaultTimeout: 10 * time.Second,
+	}
+	err := SetupDB(cfg)
+	if err != nil {
+		t.Fatalf("unexpected error setting up db: %v", err)
+	}
+
+	// Trying to set it up a second time should fail.
+	err = SetupDB(cfg)
+	if err == nil {
+		t.Fatalf("unexpected success when setting up db for the second time")
+	}
 }
 
 // TestPutGet tests and times a simple put/get roundtrip for a random 32 byte
@@ -114,6 +136,7 @@ func TestPutGet(t *testing.T) {
 	}
 }
 
+// TestBenchPut benchmarks several different put scenarios.
 func TestBenchPut(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping Put bench")
@@ -129,72 +152,21 @@ func TestBenchPut(t *testing.T) {
 	}
 
 	type testCase struct {
-		name          string
-		data          func(int) []byte
-		replFactorMin int
-		replFactorMax int
-		local         bool
-		N             int
+		name string
+		data func(int) []byte
+		N    int
 	}
 
 	testCases := []testCase{
 		{
-			name:          "full replication small data",
-			data:          func(i int) []byte { return readRnd(32) },
-			replFactorMin: -1,
-			replFactorMax: -1,
-			N:             30,
+			name: "small data",
+			data: func(i int) []byte { return readRnd(32) },
+			N:    100,
 		},
 		{
-			name:          "default replication small data",
-			data:          func(i int) []byte { return readRnd(32) },
-			replFactorMin: 0,
-			replFactorMax: 0,
-			N:             30,
-		},
-		{
-			name:          "default replication small data local",
-			data:          func(i int) []byte { return readRnd(32) },
-			replFactorMin: 0,
-			replFactorMax: 0,
-			local:         true,
-			N:             30,
-		},
-		{
-			name:          "single peer small data",
-			data:          func(i int) []byte { return readRnd(32) },
-			replFactorMin: 1,
-			replFactorMax: 1,
-			N:             30,
-		},
-		{
-			name:          "single peer small data local",
-			data:          func(i int) []byte { return readRnd(32) },
-			replFactorMin: 1,
-			replFactorMax: 1,
-			local:         true,
-			N:             30,
-		},
-		{
-			name:          "full replication large data",
-			data:          func(i int) []byte { return readRnd(1000 * 1000) },
-			replFactorMin: -1,
-			replFactorMax: -1,
-			N:             10,
-		},
-		{
-			name:          "default replication large data",
-			data:          func(i int) []byte { return readRnd(1000 * 1000) },
-			replFactorMin: 0,
-			replFactorMax: 0,
-			N:             10,
-		},
-		{
-			name:          "single peer large data",
-			data:          func(i int) []byte { return readRnd(1000 * 1000) },
-			replFactorMin: 1,
-			replFactorMax: 1,
-			N:             10,
+			name: "large data",
+			data: func(i int) []byte { return readRnd(1000 * 1000) },
+			N:    50,
 		},
 	}
 
@@ -236,9 +208,61 @@ func TestBenchPut(t *testing.T) {
 	}
 }
 
+// TestDel tests that the del() operation works.
+func TestDel(t *testing.T) {
+	tc, doneTc := newTestCtx(t)
+	defer doneTc()
+
+	data := make([]byte, 32)
+	_, err := crand.Read(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Put a random element
+	name, err := tc.s.Put(data)
+	if err != nil {
+		t.Fatalf("unable to Put: %v", err)
+	}
+
+	// Get should return it.
+	newData, err := tc.s.Get(name)
+	if err != nil {
+		t.Fatalf("unable to Get: %v", err)
+	}
+	if !bytes.Equal(newData, data) {
+		t.Fatalf("data doesn't match (name=%x). want=%x got=%x", name, data, newData)
+	}
+
+	// Delete it.
+	err = tc.s.Del(name)
+	if err != nil {
+		t.Fatalf("unable to Del: %v", err)
+	}
+
+	// Get should return an error. The error should fulfill
+	// errors.Is/errors.As.
+	_, err = tc.s.Get(name)
+	if !errors.Is(err, ErrNotFound{}) {
+		t.Fatalf("unexpected error after del. want=%v got=%v", ErrNotFound{}, err)
+	}
+
+	var notFoundErr ErrNotFound
+	if !errors.As(err, &notFoundErr) {
+		t.Fatalf("returned error does not fulfill As for ErrNotFound")
+	}
+
+	if !bytes.Equal(notFoundErr.K, name) {
+		t.Fatalf("returned error data not the same as the queried one")
+	}
+}
+
+// TestMain starts up the tests. To run the tests you need a database named
+// 'test' already setup, accessible by the current user without password and
+// with full permissions on the test database.
 func TestMain(m *testing.M) {
 	var err error
-	testDB, err = sql.Open("mysql", "root@/repli")
+	testDB, err = sql.Open("mysql", "/test")
 	if err != nil {
 		fmt.Printf("unable to connect to DB: %v\n", err)
 		os.Exit(1)
